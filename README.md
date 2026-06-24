@@ -10,7 +10,7 @@
 ![设置](https://github.com/chen310/plugin.video.bili/blob/master/public/settings.png)
 ![视频](https://github.com/chen310/plugin.video.bili/blob/master/public/video.png)
 ![我追的合集](https://github.com/LalalaO-o/Image/blob/main/kodi/image_30.png)
-![番剧](https://github.com/LalalaO-o/Image/blob/main/kodi/image_31.png)
+
 ### 感谢
 
 - [plugin.video.bilibili](https://github.com/zhengfan2014/xbmc-kodi-private-china-addons/tree/py3/plugin.video.bilibili)
