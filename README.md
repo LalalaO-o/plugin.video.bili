@@ -6,11 +6,11 @@
 
 ### 截图
 
-![主页](public/home.png)
-![设置](public/settings.png)
-![视频](public/video.png)
-![视频](public/image_27.png)
-![视频](public/image_28.png)
+![主页]()
+![设置](g)
+![视频]()
+![视频]()
+![视频]()
 ### 感谢
 
 - [plugin.video.bilibili](https://github.com/zhengfan2014/xbmc-kodi-private-china-addons/tree/py3/plugin.video.bilibili)
