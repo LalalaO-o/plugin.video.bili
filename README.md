@@ -2,7 +2,7 @@
 
 ### 下载
 
-插件下载地址: [plugin.video.bili-master.zip](https://github.com/chen310/plugin.video.bili/archive/refs/heads/master.zip)
+插件下载地址: [plugin.video.bili-master.zip](https://github.com/LalalaO-o/plugin.video.bili/archive/refs/heads/master.zip)
 
 ### 截图
 
