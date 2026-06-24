@@ -1,5 +1,8 @@
 # 哔哩哔哩 Kodi 插件
 
+用AI修复一些问题
+增加 我的订阅合集
+
 ### 下载
 
 插件下载地址: [plugin.video.bili-master.zip](https://github.com/LalalaO-o/plugin.video.bili/archive/refs/heads/master.zip)
