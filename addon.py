@@ -11,6 +11,10 @@ import shutil
 from datetime import datetime
 from functools import reduce
 from hashlib import md5
+# 额外补充新算法需要的库
+import hashlib
+import urllib.parse
+import re
 from xbmcswift2 import Plugin, xbmc, xbmcplugin, xbmcvfs, xbmcgui, xbmcaddon
 from danmaku2ass import Danmaku2ASS
 
@@ -22,12 +26,60 @@ except AttributeError:
 
 plugin = Plugin()
 
+# 1. 这一段是原文件自带的老混淆表，保留它（防止老函数报错）
 mixinKeyEncTab = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
     33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
     61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
     36, 20, 34, 44, 52
 ]
+
+# =====================================================================
+# 🔥 终极整合版：改名防止冲突 + 强力过滤特殊字符 + 原版正确混淆表
+# =====================================================================
+import hashlib
+import urllib.parse
+import re
+
+def python_enc_wbi_final(params, img_key, sub_key):
+    """
+    采用原版混淆表生成 mixin_key，并完美进行严格排序和特殊字符清洗
+    """
+    # 1. 使用原文件开头的正确混淆表 mixinKeyEncTab 生成真正的 mixin_key
+    raw_key = img_key + sub_key
+    mixin_key = ""
+    for i in mixinKeyEncTab:
+        if i < len(raw_key):
+            mixin_key += raw_key[i]
+    mixin_key = mixin_key[:32]
+
+    # 2. 注入当前时间戳 wts
+    params['wts'] = int(time.time())
+    if 'w_rid' in params:
+        del params['w_rid']
+        
+    # 3. 严格剔除 B 站风控要求的 5 个特殊字符: ! ' ( ) *
+    chr_filter = re.compile(r"[!\'\(\)*]")
+    cleaned_params = {}
+    for k, v in params.items():
+        val_str = chr_filter.sub('', str(v))
+        cleaned_params[str(k)] = val_str
+
+    # 4. 字典序升序排序
+    sorted_keys = sorted(cleaned_params.keys())
+    
+    # 5. 进行标准的 URL 编码拼接
+    query_parts = []
+    for k in sorted_keys:
+        query_parts.append(f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(cleaned_params[k], safe='')}")
+    query_str = "&".join(query_parts)
+    
+    # 6. 计算 md5 得到真正的 w_rid
+    sign_str = query_str + mixin_key
+    w_rid = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
+    
+    params['w_rid'] = w_rid
+    return params
 
 
 def tag(info, color='red'):
@@ -548,13 +600,44 @@ def generate_ass(cid):
         success = f.write(content)
     if not success:
         return
-    font_size = float(getSetting('font_size'))
-    text_opacity = float(getSetting('opacity'))
-    duration = float(getSetting('danmaku_stay_time'))
+
+    # ==================== 🔥 【强壮防爆改写区域】 ====================
+    # 1. 字体大小容错 (默认 25)
+    try:
+        val = getSetting('font_size')
+        font_size = float(val) if val and str(val).strip() else 25.0
+    except Exception:
+        font_size = 25.0
+
+    # 2. 弹幕透明度容错 (默认 1.0)
+    try:
+        val = getSetting('opacity')
+        text_opacity = float(val) if val and str(val).strip() else 1.0
+    except Exception:
+        text_opacity = 1.0
+
+    # 3. 停留时间容错 (默认 5.0)
+    try:
+        val = getSetting('danmaku_stay_time')
+        duration = float(val) if val and str(val).strip() else 5.0
+    except Exception:
+        duration = 5.0
+
+    # 4. 显示区域比例容错 (默认 1.0)
+    try:
+        val = getSetting('display_area')
+        display_area_rate = float(val) if val and str(val).strip() else 1.0
+    except Exception:
+        display_area_rate = 1.0
+
     width = 1920
     height = 540
-    reserve_blank = int((1.0 - float(getSetting('display_area'))) * height)
-    Danmaku2ASS(xmlfile, 'autodetect' , assfile, width, height, reserve_blank=reserve_blank,font_size=font_size, text_opacity=text_opacity,duration_marquee=duration,duration_still=duration)
+    
+    # 使用安全的比例计算预留空白区
+    reserve_blank = int((1.0 - display_area_rate) * height)
+    # =================================================================
+
+    Danmaku2ASS(xmlfile, 'autodetect' , assfile, width, height, reserve_blank=reserve_blank, font_size=font_size, text_opacity=text_opacity, duration_marquee=duration, duration_still=duration)
     if xbmcvfs.exists(assfile):
         return assfile
 
@@ -753,7 +836,16 @@ def index():
     categories = update_categories()
 
     for category in categories:
-        if getSetting('function.' + category['name']) == 'true':
+        # 1. 动态安全获取设置值
+        setting_val = getSetting('function.' + category['name'])
+        
+        # 2. 终极防爆转换：如果设置未被定义或失效，默认为开启（True），其余则强转字符串验证
+        if setting_val is None:
+            is_enabled = True
+        else:
+            is_enabled = str(setting_val).lower() in ['true', '1', '']
+            
+        if is_enabled:
             context_menu = [
                 ('上移菜单项', 'RunPlugin(%s)' % plugin.url_for('move_up', name=category['name'])),
                 ('下移菜单项', 'RunPlugin(%s)' % plugin.url_for('move_down', name=category['name'])),
@@ -1086,47 +1178,106 @@ def seasons_series(uid, page):
 
 
 @plugin.route('/seasons_and_series_detail/<uid>/<id>/<type>/<page>/')
-def seasons_and_series_detail(id, uid, type, page):
+def seasons_and_series_detail(uid, id, type, page):
     videos = []
-    ps = 100
+    ps = 30
+
+    # 1. 针对新版合集(season)使用高稳定的 web-space 公开接口
     if type == 'season':
-        url = '/x/polymer/space/seasons_archives_list'
-        data = {
-            'mid': uid,
-            'season_id': id,
-            'sort_reverse': False,
-            'page_size': ps,
-            'page_num': page
+        url = '/x/polymer/web-space/seasons_archives_list'
+        final_params = {
+            'mid': str(uid),
+            'season_id': str(id),
+            'page_num': str(page),
+            'page_size': str(ps)
         }
     else:
         url = '/x/series/archives'
-        data = {
-            'mid': uid,
-            'series_id': id,
-            'sort': 'desc',
-            'ps': ps,
-            'pn': page
+        raw_params = {
+            'mid': str(uid),
+            'series_id': str(id),
+            'only_meta': '0',
+            'pn': str(page),
+            'ps': str(ps)
         }
-    res = get_api_data(url, data)
-    if res['code'] != 0:
+        try:
+            img_key, sub_key = getWbiKeys()
+            if img_key and sub_key:
+                final_params = encWbi(raw_params, img_key, sub_key)
+            else:
+                final_params = raw_params
+        except Exception as e:
+            xbmc.log(f"[Bili Addon] 列表页 Wbi 签名失败: {str(e)}", xbmc.LOGWARNING)
+            final_params = raw_params
+
+    # 2. 发起网络请求
+    res = get_api_data(url, final_params)
+    if res.get('code') != 0 or not res.get('data'):
+        msg = res.get('message', '未知网络错误')
+        xbmc.log(f"[Bili Addon] 详情页接口返回异常：Code: {res.get('code')}, Msg: {msg}", xbmc.LOGWARNING)
+        notify('提示', f'合集解析反馈: {msg}')
         return videos
-    list = res['data']['archives']
-    for item in list:
-        video = get_video_item(item)
-        if video:
-            videos.append(video)
+
+    data_obj = res['data']
+    
+    # 3. 解析并提取视频数组
     if type == 'season':
-        if res['data']['page']['page_num'] * res['data']['page']['page_size'] < res['data']['page']['total']:
-            videos.append({
-                'label': tag('下一页', 'yellow'),
-                'path': plugin.url_for('seasons_and_series_detail', uid=uid, id=id, type=type, page=int(page)+1)
-            })
+        archives = data_obj.get('archives', [])
+        page_info = data_obj.get('page', {})
+        total_count = page_info.get('total', len(archives))
     else:
-        if res['data']['page']['num'] * res['data']['page']['size'] < res['data']['page']['total']:
+        archives = data_obj.get('archives', [])
+        page_info = data_obj.get('page', {})
+        total_count = page_info.get('num', len(archives))
+
+    # 4. 遍历并组装成 Kodi 播放列表项
+    for item in archives:
+        try:
+            bvid = item.get('bvid')
+            title = item.get('title') or '未命名视频'
+            if not bvid:
+                continue
+
+            pic = item.get('pic') or ''
+            duration = item.get('duration', 0)
+            
+            stat = item.get('stat', {})
+            view_count = convert_number(stat.get('view', 0)) if 'convert_number' in globals() else str(stat.get('view', 0))
+            plot = f"标题: {title}\n播放量: {view_count}\n\n简介: {item.get('desc', '')}"
+
+            # 🔥 【终极对齐】直接伪造一个原插件看能完美匹配的 5 参数路由字符串
+            # 默认补齐 cid='0', bangumi='false', movie='false'
+            # 这样既能避开 NotFoundException，又完全符合原插件对 video 函数的多参数定义！
+            import urllib.parse
+            safe_title = urllib.parse.quote(title)
+            path = f"plugin://plugin.video.bili/video/{bvid}/0/false/false/{safe_title}/"
+
             videos.append({
-                'label': tag('下一页', 'yellow'),
-                'path': plugin.url_for('seasons_and_series_detail', uid=uid, id=id, type=type, page=int(page)+1)
+                'label': title,
+                'path': path,
+                'icon': pic,
+                'thumbnail': pic,
+                'is_playable': True,  # 告诉 Kodi 这是一个可以直接落子播放的媒体
+                'info': {
+                    'mediatype': 'video',
+                    'title': title,
+                    'plot': plot,
+                    'duration': duration
+                }
             })
+        except Exception as e:
+            xbmc.log(f"[Bili Addon] 解析合集单条视频失败: {str(e)}", xbmc.LOGERROR)
+            continue
+
+    # 5. 翻页控制
+    current_page = int(page)
+    if len(videos) > 0 and (current_page * ps < total_count):
+        next_page = current_page + 1
+        videos.append({
+            'label': '下一页 >>',
+            'path': plugin.url_for('seasons_and_series_detail', uid=uid, id=id, type=type, page=str(next_page))
+        })
+
     return videos
 
 
@@ -1430,25 +1581,215 @@ def live_area(pid, id, page):
 
 @plugin.route('/my_collection/')
 def my_collection():
-    uid= get_uid()
+    uid = get_uid()
     if uid == '0':
         notify('提示', '未登录')
         return []
+        
     items = [
         {
             'label': '我的收藏夹',
             'path': plugin.url_for('favlist_list', uid=uid),
         },
         {
+            'label': '我追的合集/系列',
+            # 🔥 修改这里：显式传入初始页码 page='1'
+            'path': plugin.url_for('fav_collections', uid=uid, page='1'), 
+        },
+        {
             'label': '追番',
-            'path': plugin.url_for('fav_series', uid=uid, type=1)
+            'path': plugin.url_for('fav_series', uid=uid, type=1, page='1')
         },
         {
             'label': '追剧',
-            'path': plugin.url_for('fav_series', uid=uid, type=2)
+            'path': plugin.url_for('fav_series', uid=uid, type=2, page='1')
         },
     ]
     return items
+
+# =====================================================================
+# 1. Wbi 签名加密核心算法（请确保这段代码完好无损地留在 addon.py 中）
+# =====================================================================
+import time
+import hashlib
+import urllib.parse
+import re
+
+# B 站固定的 Wbi 字符混淆表
+_WBI_MIXIN_STR_MAP = [
+    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
+    33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 54, 40,
+    17, 6, 20, 51, 30, 26, 36, 25, 56, 57, 52, 4, 11, 22, 47, 55, 34, 61, 21,
+    62, 60, 59, 1, 63, 0
+]
+
+def get_mixin_key(img_key, sub_key):
+    """根据 B 站返回的 img_key 和 sub_key 重新打乱生成 mixinKey"""
+    raw_key = img_key + sub_key
+    mixin_key = ""
+    for i in _WBI_MIXIN_STR_MAP:
+        if i < len(raw_key):
+            mixin_key += raw_key[i]
+    return mixin_key[:32]
+
+def fetch_and_generate_mixin_key():
+    """从 B 站 nav 接口动态获取最新的 wbi 密钥对"""
+    try:
+        res = get_api_data('/x/web-interface/nav', {})
+        if res.get('code') == 0 and 'wbi_img' in res.get('data', {}):
+            wbi_img = res['data']['wbi_img']
+            img_url = wbi_img.get('img_url', '')
+            sub_url = wbi_img.get('sub_url', '')
+            
+            img_key = img_url.split('/')[-1].split('.')[0]
+            sub_key = sub_url.split('/')[-1].split('.')[0]
+            return get_mixin_key(img_key, sub_key)
+    except Exception as e:
+        xbmc.log(f"[Bili Addon] 获取 Wbi 密钥失败: {str(e)}", xbmc.LOGWARNING)
+    return "ea1db124c04943d69947bc66cbb77a24"
+
+def python_enc_wbi(params, mixin_key):
+    """完美复刻 PiliPlus 的 Dart 版 encWbi 签名算法"""
+    params['wts'] = int(time.time())
+    
+    if 'w_rid' in params:
+        del params['w_rid']
+        
+    chr_filter = re.compile(r"[!\'\(\)*]")
+    cleaned_params = {}
+    for k, v in params.items():
+        val_str = chr_filter.sub('', str(v))
+        cleaned_params[str(k)] = val_str
+
+    sorted_keys = sorted(cleaned_params.keys())
+    
+    query_parts = []
+    for k in sorted_keys:
+        query_parts.append(f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(cleaned_params[k], safe='')}")
+    query_str = "&".join(query_parts)
+    
+    sign_str = query_str + mixin_key
+    w_rid = hashlib.md5(sign_str.encode('utf-8')).hexdigest()
+    
+    params['w_rid'] = w_rid
+    return params
+
+# ---------------- 🔥 下面是新增的“我追的合集”解析路由 ----------------
+# 1. 路由路径严格绑定 uid 和 page，防止 Kodi 路由框架丢参数
+@plugin.route('/fav_collections/<uid>/<page>/')
+def fav_collections(uid, page):
+    videos = []
+    if uid == '0':
+        notify('提示', '未登录')
+        return videos
+
+    # 2. 从路径中解析当前页码
+    try:
+        current_page = int(page)
+    except:
+        current_page = 1
+
+    # 严格对齐你抓包拿到的单页数量 50
+    page_size = 50
+
+    # 3. 严格按照你抓包得到的 URL 结构构建参数字典（🎯 剔除了任何 Wbi 加密参数）
+    raw_params = {
+        'pn': str(current_page),      # 当前真正改变的页码
+        'ps': str(page_size),         # 50
+        'up_mid': str(uid),
+        'platform': 'web',
+        'web_location': '333.1387'
+    }
+
+    # 4. 定义双向拉取的两个核心合集接口
+    api_urls = [
+        '/x/v3/fav/folder/collected/list',
+        '/x/v3/fav/folder/collected/list/v2'
+    ]
+    
+    raw_collections_list = []
+    has_more = False  # 标记是否还有下一页数据
+
+    # 5. 直接发送纯净请求（调用内置的 get_api_data，不要在外面套 encWbi）
+    for api_url in api_urls:
+        try:
+            # 🎯 直接传参请求，不进行 w_rid 签名混淆
+            res = get_api_data(api_url, raw_params)
+            if res.get('code') == 0 and res.get('data'):
+                data_obj = res['data']
+                cur_list = data_obj.get('list') or data_obj.get('items') or []
+                if cur_list:
+                    raw_collections_list.extend(cur_list)
+                
+                # 判断 B 站是否还有更多合集
+                if data_obj.get('has_more') or data_obj.get('has_more_items') or len(cur_list) >= page_size:
+                    has_more = True
+        except Exception as e:
+            xbmc.log(f"[Bili Addon] 请求合集接口 {api_url} 异常: {str(e)}", xbmc.LOGWARNING)
+
+    # 6. 利用 Python 集合去重
+    seen_ids = set()
+    collections_list = []
+    for item in raw_collections_list:
+        sid = item.get('media_id') or item.get('id')
+        if sid and sid not in seen_ids:
+            seen_ids.add(sid)
+            collections_list.append(item)
+
+    xbmc.log(f"[Bili Addon] 合集页面成功刷新！当前加载第 {current_page} 页，本页共显示 {len(collections_list)} 个去重后的合集", xbmc.LOGINFO)
+
+    # 7. 解析数据并输出到 Kodi 界面
+    for item in collections_list:
+        try:
+            title = item.get('title') or item.get('name') or '未命名合集'
+            season_id = item.get('media_id') or item.get('id')
+            if not season_id:
+                continue
+
+            rcount = item.get('media_count') or item.get('count') or item.get('total') or 0
+            upper = item.get('upper') or item.get('owner') or {}
+            author = upper.get('name') or '未知UP主' if isinstance(upper, dict) else '未知UP主'
+            author_mid = upper.get('mid') or upper.get('uid') or uid if isinstance(upper, dict) else uid
+
+            bili_type_enum = item.get('type', 0)
+            item_type = 'series' if bili_type_enum == 1 else 'season'
+
+            type_tag = '【追的列表】' if item_type == 'series' else '【追的合集】'
+            label = f"{type_tag}{title} (共{rcount}个视频) - {author}"
+            plot = f"名称: {title}\n创作者: {author}\n分类: {item_type}\n视频总数: {rcount}个\n简介: {item.get('intro', item.get('desc', '暂无简介'))}"
+            cover = item.get('cover') or item.get('pic') or ''
+
+            path = plugin.url_for('seasons_and_series_detail', uid=str(author_mid), id=str(season_id), type=item_type, page='1')
+
+            videos.append({
+                'label': label,
+                'path': path,
+                'icon': cover,
+                'thumbnail': cover,
+                'info': {
+                    'mediatype': 'video',
+                    'title': title,
+                    'plot': plot
+                }
+            })
+        except:
+            continue
+
+    # 8. 🔥 追加“下一页”项，将下一页页码硬编码进 Kodi 路径里
+    if has_more and len(collections_list) > 0:
+        next_page_num = current_page + 1
+        videos.append({
+            'label': tag('下一页', 'yellow') if 'tag' in globals() else '>> 下一页',
+            'path': plugin.url_for('fav_collections', uid=str(uid), page=str(next_page_num))
+        })
+
+    if not videos:
+        videos.append({
+            'label': '提示：你追的合集/系列为空', 
+            'path': plugin.url_for('my_collection')
+        })
+
+    return videos
 
 
 @plugin.route('/web_dynamic/<page>/<offset>/')
@@ -1465,105 +1806,191 @@ def web_dynamic(page, offset):
     res = get_api_data(url, data)
     if res['code'] != 0:
         return videos
-    list = res['data']['items']
-    offset = res['data']['offset']
-    for d in list:
-        major = d['modules']['module_dynamic']['major']
-        if not major:
-            continue
-        author = d['modules']['module_author']['name']
-        mid = d['modules']['module_author']['mid']
-        if 'archive' in major:
-            item = major['archive']
-            item['author'] = author
-            item['mid'] = mid
-            video = get_video_item(item)
-        elif 'live_rcmd' in major:
-            content = major['live_rcmd']['content']
-            item = json.loads(content)
-            if item['live_play_info']['live_status'] == 1:
-                label = tag('【直播中】', 'red') + author + ' - ' + item['live_play_info']['title']
+    
+    list_data = res['data'].get('items', [])
+    offset = res['data'].get('offset', offset)
+    
+    for d in list_data:
+        try:
+            # 基础防御：确保 modules 和相关子模块存在
+            if 'modules' not in d or 'module_dynamic' not in d['modules'] or 'module_author' not in d['modules']:
+                continue
+                
+            major = d['modules']['module_dynamic'].get('major')
+            if not major:
+                continue
+                
+            author = d['modules']['module_author'].get('name', '未知UP主')
+            mid = d['modules']['module_author'].get('mid', 0)
+            
+            video = None # 初始化变量，防止后续 append 报错
+
+            # 1. 处理投稿视频动态
+            if 'archive' in major and major['archive'] is not None:
+                item = major['archive']
+                item['author'] = author
+                item['mid'] = mid
+                video = get_video_item(item)
+                
+            # 2. 处理直播动态
+            elif 'live_rcmd' in major and major['live_rcmd'] is not None:
+                content = major['live_rcmd'].get('content')
+                if not content:
+                    continue
+                item = json.loads(content)
+                
+                if item['live_play_info']['live_status'] == 1:
+                    label = tag('【直播中】', 'red') + author + ' - ' + item['live_play_info']['title']
+                else:
+                    label = tag('【未直播】', 'grey') + author + ' - ' + item['live_play_info']['title']
+                    
+                plot = f"UP: {author}\tID: {mid}\n房间号: {item['live_play_info']['room_id']}\n{item['live_play_info']['watched_show']['text_large']}\n"
+                plot += f"分区: {tag(item['live_play_info']['parent_area_name'], 'blue')} {tag(item['live_play_info']['area_name'], 'blue')}"
+                context_menu = [
+                    (f"转到UP: {author}", f"Container.Update({plugin.url_for('user', id=mid)})")
+                ]
+                video = {
+                    'label': label,
+                    'path': plugin.url_for('live', id=item["live_play_info"]["room_id"]),
+                    'is_playable': True,
+                    'icon': item["live_play_info"]["cover"],
+                    'thumbnail': item["live_play_info"]["cover"],
+                    'context_menu': context_menu,
+                    'info': {
+                        'mediatype': 'video',
+                        'title': item['live_play_info']['title'],
+                        'plot': plot
+                    },
+                    'info_type': 'video',
+                }
             else:
-                label = tag('【未直播】', 'grey') + author + ' - ' + item['live_play_info']['title']
-            plot = f"UP: {author}\tID: {mid}\n房间号: {item['live_play_info']['room_id']}\n{item['live_play_info']['watched_show']['text_large']}\n"
-            plot += f"分区: {tag(item['live_play_info']['parent_area_name'], 'blue')} {tag(item['live_play_info']['area_name'], 'blue')}"
-            context_menu = [
-                (f"转到UP: {author}", f"Container.Update({plugin.url_for('user', id=mid)})")
-            ]
-            video = {
-                'label': label,
-                'path': plugin.url_for('live', id=item["live_play_info"]["room_id"]),
-                'is_playable': True,
-                'icon': item["live_play_info"]["cover"],
-                'thumbnail': item["live_play_info"]["cover"],
-                'context_menu': context_menu,
-                'info': {
-                    'mediatype': 'video',
-                    'title': item['live_play_info']['title'],
-                    'plot': plot
-                },
-                'info_type': 'video',
-            }
-        else:
+                # 纯图文、转发文字动态等没有视频和直播内容，直接跳过
+                continue
+                
+            # 确保成功解析出了可供 Kodi 渲染的条目
+            if video:
+                videos.append(video)
+                
+        except Exception as e:
+            # 单条动态解析如果遇到未知变动，记录日志并跳过，保证其他动态正常显示
+            xbmc.log(f"[Bili Addon] 解析单条动态出错: {str(e)}", xbmc.LOGERROR)
             continue
-        videos.append(video)
-    if res['data']['has_more']:
+            
+    if res['data'].get('has_more'):
         videos.append({
             'label': tag('下一页', 'yellow'),
             'path': plugin.url_for('web_dynamic', page=int(page)+1, offset=offset)
         })
     return videos
 
-@plugin.route('/fav_series/<uid>/<type>/')
-def fav_series(uid, type):
+# 1. 路由路径同时绑定 uid, type, page。默认进入时如果不传 page，框架或入口默认给 '1'
+@plugin.route('/fav_series/<uid>/<type>/<page>/')
+def fav_series(uid, type, page='1'):
     videos = []
     if uid == '0':
+        notify('提示', '未登录')
         return videos
 
-    res = get_api_data('/x/space/bangumi/follow/list', {'vmid': uid, 'type': type})
-    if res['code'] != 0:
-        return videos
+    # 2. 安全转换页码
+    try:
+        current_page = int(page)
+    except:
+        current_page = 1
 
-    list = res['data']['list']
-    for item in list:
-        label = item['title']
-        if item['season_type_name']:
-            label = tag('【' + item['season_type_name'] + '】', 'pink') + label
-        plot = f"{tag(item['title'], 'pink')}\t{item['new_ep']['index_show']}\n"
-        if item['publish']['release_date_show']:
-            plot += f"发行时间: {item['publish']['release_date_show']}\n"
-        if item['styles']:
-            plot += f"类型: {tag(' '.join(item['styles']), 'blue')}\n"
-        if item['areas']:
-            plot += f"地区: {' '.join( [area['name'] for area in item['areas']])}\n"
-        state = ''
-        if 'stat' in item:
-            stat = item['stat']
-            if 'view' in stat:
-                state += f"{convert_number(stat['view'])}播放 · "
-            if 'likes' in stat:
-                state += f"{convert_number(stat['likes'])}点赞 · "
-            if 'coin' in stat:
-                state += f"{convert_number(stat['coin'])}投币 · "
-            if 'favorite' in stat:
-                state += f"{convert_number(stat['favorite'])}收藏 · "
-            if 'reply' in stat:
-                state += f"{convert_number(stat['reply'])}评论 · "
-            if 'danmaku' in stat:
-                state += f"{convert_number(stat['danmaku'])}弹幕 · "
-            if state:
-                plot += f"{state[:-3]}\n"
-        plot += f"\n{item['summary']}"
-        video = {
-            'label': label,
-            'path': plugin.url_for('bangumi', type='season_id' ,id=item['season_id']),
-            'icon': item['cover'],
-            'thumbnail': item['cover'],
-            'info': {
-                'plot': plot
-            }
-        }
-        videos.append(video)
+    page_size = 24  # 严格对齐 B 站网页端的 24 条规则
+
+    # 3. 动态提取 B 站最新的 Wbi 密钥
+    try:
+        img_key, sub_key = getWbiKeys()
+    except Exception as e:
+        xbmc.log(f"[Bili Addon] 获取 Wbi 原始密钥失败: {str(e)}", xbmc.LOGWARNING)
+        img_key, sub_key = "", ""
+
+    # 4. 严格按照你抓包的网页端参数构建字典
+    raw_params = {
+        'vmid': str(uid),
+        'type': str(type),           # 1为番剧，2为追剧
+        'pn': str(current_page),      # 👈 这一步至关重要：改变的页码必须参与 Wbi 签名
+        'ps': str(page_size),
+        'playform': 'web',           # B站特有的错别字参数，必须用 playform
+        'follow_status': '0',
+        'web_location': '333.1387'
+    }
+
+    # 5. 🔥 每一页请求前，重新计算 w_rid 和 wts 签名
+    if img_key and sub_key:
+        try:
+            # 这里的 encWbi 会在 raw_params 内部塞入全新的 'wts' 和当前页对应的 'w_rid'
+            signed_params = encWbi(raw_params, img_key, sub_key)
+        except Exception as e:
+            xbmc.log(f"[Bili Addon] Wbi 签名报错: {str(e)}", xbmc.LOGWARNING)
+            signed_params = raw_params
+    else:
+        signed_params = raw_params
+
+    # 6. 发送网络请求
+    api_url = '/x/space/bangumi/follow/list'
+    has_more = False
+    try:
+        res = get_api_data(api_url, signed_params)
+        if res.get('code') == 0 and res.get('data'):
+            data_obj = res['data']
+            # 番剧列表通常在 list 字段中
+            series_list = data_obj.get('list') or []
+            
+            # 解析列表数据
+            for item in series_list:
+                title = item.get('title', '未知番剧')
+                season_id = item.get('season_id')
+                if not season_id:
+                    continue
+                
+                # 构建标签：追加当前看到哪一集等进度信息（如果有的话）
+                new_ep = item.get('new_ep', {})
+                ep_status = f"更新至{new_ep.get('index_show', '未知')}" if new_ep else ""
+                label = f"【追番】{title} ({ep_status})"
+                
+                cover = item.get('cover') or ''
+                plot = f"名称: {title}\n总集数: {item.get('total_count', '未知')}\n简介: {item.get('evaluate', '暂无简介')}"
+                
+                # 点击番剧后跳转到详情页
+                path = plugin.url_for('bangumi', type='season_id', id=str(season_id))
+                
+                videos.append({
+                    'label': label,
+                    'path': path,
+                    'icon': cover,
+                    'thumbnail': cover,
+                    'info': {
+                        'mediatype': 'video',
+                        'title': title,
+                        'plot': plot
+                    }
+                })
+            
+            # 7. 判断是否追加下一页：
+            # 可以通过看返回的总数 total 是否大于当前已经拉取到的总量
+            total_count = data_obj.get('total', 0)
+            if total_count > (current_page * page_size) and len(series_list) >= page_size:
+                has_more = True
+
+    except Exception as e:
+        xbmc.log(f"[Bili Addon] 请求追番列表异常: {str(e)}", xbmc.LOGWARNING)
+
+    # 8. 🔥 追加下一页入口，保证路径参数强绑定
+    if has_more and len(videos) > 0:
+        next_page_num = current_page + 1
+        videos.append({
+            'label': tag('下一页', 'yellow') if 'tag' in globals() else '>> 下一页',
+            'path': plugin.url_for('fav_series', uid=str(uid), type=str(type), page=str(next_page_num))
+        })
+
+    if not videos:
+        videos.append({
+            'label': '提示：这里空空如也',
+            'path': plugin.url_for('my_collection')
+        })
+
     return videos
 
 
@@ -2095,6 +2522,59 @@ def video(id, cid, ispgc, audio_only, title):
     if video_url and (getSetting('report_history') == 'true'):
         report_history(id, cid)
     plugin.set_resolved_url(video_url)
+
+@plugin.route('/bangumipages/<season_id>/')
+def bangumipages(season_id):
+    items = []
+    # 使用 B 站现代 Web 端番剧接口
+    url = '/pgc/view/web/season'
+    res = get_api_data(url, {'season_id': season_id})
+    
+    if res.get('code') != 0 or not res.get('result'):
+        # 如果接口请求失败，弹出提示
+        notify('提示', '未能获取到番剧正片数据')
+        return items
+        
+    result = res['result']
+    episodes = result.get('episodes', [])
+    
+    for ep in episodes:
+        try:
+            # 提取单集标题（例如: "第1话 热血开局"）
+            ep_title = ep.get('share_copy', '')
+            if not ep_title:
+                title_long = ep.get('long_title', '')
+                title_short = ep.get('title', '')
+                ep_title = f"第 {title_short} 话 {title_long}".strip()
+                
+            bvid = ep.get('bvid')
+            cid = ep.get('cid')
+            
+            if not bvid:
+                continue
+                
+            # 直接调用原插件原本就支持得完美的 'video' 播放路由
+            # 这样点击单集就能直接调起 Kodi 播放器
+            path = plugin.url_for('video', id=bvid, cid=cid, ispgc='true', audio_only='false', title=ep_title)
+            
+            items.append({
+                'label': ep_title,
+                'path': path,
+                'is_playable': True,
+                'icon': ep.get('cover'),
+                'thumbnail': ep.get('cover'),
+                'info': {
+                    'mediatype': 'video',
+                    'title': ep_title,
+                    'plot': ep.get('badge_info', {}).get('text', '') or '番剧正片'
+                },
+                'info_type': 'video'
+            })
+        except Exception as e:
+            xbmc.log(f"[Bili Addon] 解析番剧单集出错: {str(e)}", xbmc.LOGERROR)
+            continue
+            
+    return items
 
 
 if __name__ == '__main__':
