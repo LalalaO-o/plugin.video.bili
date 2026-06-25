@@ -3,6 +3,8 @@
 ## 用AI修复一些问题
 ## 增加 我的订阅合集
 
+感谢原作者chen310 和 
+
 ### 下载
 
 插件下载地址: [plugin.video.bili-master.zip](https://github.com/LalalaO-o/plugin.video.bili/archive/refs/heads/master.zip)
@@ -15,7 +17,8 @@
 ![我追的合集](https://github.com/LalalaO-o/Image/blob/main/kodi/image_30.png)
 
 ### 感谢
-
+- [原作者chen310](https://github.com/chen310)
+- [flhs0606](https://github.com/flhs0606)
 - [plugin.video.bilibili](https://github.com/zhengfan2014/xbmc-kodi-private-china-addons/tree/py3/plugin.video.bilibili)
 - [danmaku2ass](https://github.com/m13253/danmaku2ass)
 - [plugin.video.youtube](https://github.com/anxdpanic/plugin.video.youtube)
