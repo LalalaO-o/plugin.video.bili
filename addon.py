@@ -1,4 +1,5 @@
 # -*- coding:utf-8 -*-
+import atexit
 import sys
 import os
 from urllib.parse import urlencode
@@ -25,6 +26,18 @@ except AttributeError:
     pass
 
 plugin = Plugin()
+
+
+def _atexit_cleanup():
+    try:
+        from danmaku import stop_all_live_danmaku
+        stop_all_live_danmaku()
+    except Exception:
+        pass
+
+
+atexit.register(_atexit_cleanup)
+
 
 # 1. 这一段是原文件自带的老混淆表，保留它（防止老函数报错）
 mixinKeyEncTab = [
@@ -2330,7 +2343,16 @@ def live(id):
     streams = res['data']['playurl_info']['playurl']['stream']
     xbmc.log('live_stream: ' + str(streams))
     live_url = choose_live_resolution(streams) + '|Referer=https://www.bilibili.com'
-    plugin.set_resolved_url(live_url)
+    live_ass = None
+    if getSetting('enable_live_danmaku') == 'true':
+        try:
+            from danmaku import start_live_danmaku
+            uid = get_uid()
+            cookie = get_cookie()
+            live_ass, _ = start_live_danmaku(id, uid, cookie)
+        except Exception as e:
+            xbmc.log('[live] danmaku start error: %s' % e, xbmc.LOGWARNING)
+    plugin.set_resolved_url(live_url, subtitles=live_ass)
 
 
 def md2ss(id):
