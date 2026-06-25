@@ -290,3 +290,11 @@ msgstr ""
 msgctxt "#30132"
 msgid "This feature requires the inputstream.adaptive plugin. When disabled, the maximum video resolution is limited to 720P."
 msgstr ""
+
+msgctxt "#30133"
+msgid "Enable Live Danmaku"
+msgstr ""
+
+msgctxt "#30134"
+msgid "Display live danmaku (barrage) overlay during live streams."
+msgstr ""

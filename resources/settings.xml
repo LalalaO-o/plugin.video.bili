@@ -64,7 +64,7 @@
 				</setting>
 				<setting id="opacity" type="number" label="30018" help="30017">
 					<level>0</level>
-					<default>1</default>
+					<default>1.0</default>
 					<constraints>
 						<minimum>0.0</minimum>
 						<step>0.01</step>
@@ -88,7 +88,7 @@
 				</setting>
 				<setting id="display_area" type="number" label="30130" help="30017">
 					<level>0</level>
-					<default>1</default>
+					<default>1.0</default>
 					<constraints>
 						<minimum>0.0</minimum>
 						<step>0.01</step>
@@ -97,6 +97,11 @@
 					<control type="slider" format="integer">
 						<popup>false</popup>
 					</control>
+				</setting>
+				<setting id="enable_live_danmaku" type="boolean" label="30133" help="30134">
+					<level>0</level>
+					<default>true</default>
+					<control type="toggle"/>
 				</setting>
 			</group>
 			<group id="3" label="30010">
@@ -115,10 +120,10 @@
 						<data>InstallAddon(inputstream.adaptive)</data>
 					</control>
 					<dependencies>
-                        <dependency type="enable">
-                            <condition name="InfoBool" on="property">!System.HasAddon(inputstream.adaptive)</condition>
-                        </dependency>
-                    </dependencies>
+						<dependency type="enable">
+							<condition name="InfoBool" on="property">!System.HasAddon(inputstream.adaptive)</condition>
+						</dependency>
+					</dependencies>
 				</setting>
 				<setting id="server_port" type="integer" label="30012" help="">
 					<level>0</level>
@@ -126,7 +131,7 @@
 					<control type="edit" format="integer">
 						<heading>30012</heading>
 					</control>
-				</setting>		
+				</setting>
 			</group>
 			<group id="4" label="30020">
 				<setting id="video_resolution" type="integer" label="30021" help="">
@@ -166,10 +171,10 @@
 						<heading>30035</heading>
 					</control>
 					<dependencies>
-                        <dependency type="enable">
-                            <condition operator="is" setting="enable_dash">true</condition>
-                        </dependency>
-                    </dependencies>
+						<dependency type="enable">
+							<condition operator="is" setting="enable_dash">true</condition>
+						</dependency>
+					</dependencies>
 				</setting>
 			</group>
 			<group id="5" label="30040">
